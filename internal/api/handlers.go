@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fast-ingest/internal/model"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -45,8 +46,56 @@ func (s *Server) HandleIngestEvent(w http.ResponseWriter, r *http.Request) {
 // HandleBulkIngestEvents handles POST /events/bulk
 // Supports bulk ingestion of multiple event payloads.
 func (s *Server) HandleBulkIngestEvents(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement bulk event ingestion logic here
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	r.Body = http.MaxBytesReader(w, r.Body, 20*1024*1024) // Limit request body to 20MB
+
+	var events []model.Event
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields() // Strict decoding to catch unexpected fields
+
+	if err := dec.Decode(&events); err != nil {
+		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	if len(events) == 0 {
+		http.Error(w, "events is required", http.StatusBadRequest)
+		return
+	}
+
+	if len(events) > 1000 {
+		http.Error(w, "too many events (max 1000)", http.StatusBadRequest)
+		return
+	}
+
+	// Validate each event in the batch
+	for i := 0; i < len(events); i++ {
+		e := events[i]
+		// Validate required fields
+		if e.EventName == "" || e.Channel == "" || e.UserID == "" || e.Timestamp == 0 {
+			http.Error(w, fmt.Sprintf("invalid event at index %d", i), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Queue events for processing
+	for i := 0; i < len(events); i++ {
+		e := events[i]
+		select {
+		case s.Queue <- e:
+		default:
+			// queue full
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "ingest queue full", http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":   "accepted",
+		"accepted": len(events),
+	})
 }
 
 // HandleGetMetrics handles GET /metrics

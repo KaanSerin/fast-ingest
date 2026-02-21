@@ -60,8 +60,10 @@ func main() {
 	}()
 
 	w := &worker.Writer{
-		Store: store,
-		In:    server.Queue,
+		Store:         store,
+		In:            server.Queue,
+		BatchSize:     500,
+		FlushInterval: 100 * time.Millisecond,
 	}
 
 	// Start the writer in a separate goroutine

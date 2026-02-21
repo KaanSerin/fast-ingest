@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
 	"fast-ingest/internal/helpers"
 	"fast-ingest/internal/model"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -19,7 +21,43 @@ type PostgresStore struct {
 
 func (p *PostgresStore) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 
-func (p *PostgresStore) InsertEvents(ctx context.Context, events []model.Event) error { /* ... */
+func (p *PostgresStore) InsertEvents(ctx context.Context, events []model.Event) error {
+	log.Printf("Inserting batch of %d events", len(events))
+
+	// Using a transaction with pgx.Batch to bulk insert events
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	batch := &pgx.Batch{}
+	for _, e := range events {
+		t := time.Unix(e.Timestamp, 0).UTC()
+		tagsJSON, _ := json.Marshal(e.Tags)
+		metaJSON, _ := json.Marshal(e.Metadata)
+
+		batch.Queue(`
+			INSERT INTO events (dedupe_key, event_name, channel, campaign_id, user_id, ts, tags, metadata)
+			VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb)
+			ON CONFLICT (dedupe_key) DO NOTHING;
+		`, helpers.DedupeKey(e), e.EventName, e.Channel, helpers.NullIfEmpty(e.CampaignID), e.UserID, t, tagsJSON, metaJSON)
+	}
+
+	start := time.Now()
+
+	br := tx.SendBatch(ctx, batch)
+	if err := br.Close(); err != nil {
+		return err
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Batch insert took %d ms", time.Since(start).Milliseconds())
+
 	return nil
 }
 
