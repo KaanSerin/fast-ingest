@@ -12,6 +12,7 @@ import (
 
 	"fast-ingest/internal/api"
 	"fast-ingest/internal/storage"
+	"fast-ingest/internal/worker"
 
 	"github.com/joho/godotenv"
 )
@@ -35,15 +36,17 @@ func main() {
 	defer store.Close()
 
 	// Set up the router
-	r := api.NewRouter(store)
+	server := api.NewServer(store, 20000) // Queue size of 20,000 for event processing
+	r := api.NewRouter(*server)
 
+	// Get the port from environment variables, default to 8080 if not set
 	port := os.Getenv("PORT")
 	if port == "" {
 		log.Println("PORT environment variable is not set, defaulting to 8080")
 		port = "8080" // Default to 8080 if not set
 	}
 
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%v", port),
 		Handler: r,
 	}
@@ -51,10 +54,18 @@ func main() {
 	// Start the server in a separate goroutine
 	go func() {
 		log.Printf("Starting the server on :%s\n", port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Could not listen on :%s: %v\n", port, err)
 		}
 	}()
+
+	w := &worker.Writer{
+		Store: store,
+		In:    server.Queue,
+	}
+
+	// Start the writer in a separate goroutine
+	go w.Run(ctx)
 
 	// Listen for the interrupt signal
 	<-ctx.Done()
@@ -66,7 +77,7 @@ func main() {
 	defer cancel()
 
 	// Trigger graceful shutdown
-	if err := server.Shutdown(shutdownCtx); err != nil {
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 }

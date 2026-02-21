@@ -2,10 +2,12 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
+	"fast-ingest/internal/helpers"
 	"fast-ingest/internal/model"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,10 +17,27 @@ type PostgresStore struct {
 	pool *pgxpool.Pool
 }
 
-func (p *PostgresStore) Ping(ctx context.Context) error                       { return p.pool.Ping(ctx) }
-func (p *PostgresStore) InsertEvent(ctx context.Context, e model.Event) error { /* ... */ return nil }
+func (p *PostgresStore) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
+
 func (p *PostgresStore) InsertEvents(ctx context.Context, events []model.Event) error { /* ... */
 	return nil
+}
+
+func (p *PostgresStore) InsertEvent(ctx context.Context, e model.Event) error {
+
+	// Postgres expects timestamps in UTC, so we convert to UTC before inserting.
+	t := time.Unix(e.Timestamp, 0).UTC()
+
+	// Marshal tags and metadata to JSON for storage in jsonb columns.
+	tagsJSON, _ := json.Marshal(e.Tags)
+	metaJSON, _ := json.Marshal(e.Metadata)
+
+	_, err := p.pool.Exec(ctx, `
+		INSERT INTO events (event_name, channel, campaign_id, user_id, ts, tags, metadata)
+		VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)
+	`, e.EventName, e.Channel, helpers.NullIfEmpty(e.CampaignID), e.UserID, t, tagsJSON, metaJSON)
+
+	return err
 }
 
 // NewPostgres initializes a new PostgresStore with a connection pool.
