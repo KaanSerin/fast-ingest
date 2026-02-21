@@ -33,9 +33,10 @@ func (p *PostgresStore) InsertEvent(ctx context.Context, e model.Event) error {
 	metaJSON, _ := json.Marshal(e.Metadata)
 
 	_, err := p.pool.Exec(ctx, `
-		INSERT INTO events (event_name, channel, campaign_id, user_id, ts, tags, metadata)
-		VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)
-	`, e.EventName, e.Channel, helpers.NullIfEmpty(e.CampaignID), e.UserID, t, tagsJSON, metaJSON)
+		INSERT INTO events (dedupe_key, event_name, channel, campaign_id, user_id, ts, tags, metadata)
+VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb)
+ON CONFLICT (dedupe_key) DO NOTHING;
+	`, helpers.DedupeKey(e), e.EventName, e.Channel, helpers.NullIfEmpty(e.CampaignID), e.UserID, t, tagsJSON, metaJSON)
 
 	return err
 }
