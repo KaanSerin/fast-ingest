@@ -1,11 +1,20 @@
 package api
 
 import (
+	"fast-ingest/internal/storage"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-func NewRouter() *chi.Mux {
+// Server represents the API server with its dependencies.
+type Server struct {
+	store storage.Store
+}
+
+// NewRouter sets up the API routes and returns a chi.Mux router.
+func NewRouter(store storage.Store) *chi.Mux {
+	s := &Server{store: store}
 	r := chi.NewRouter()
 
 	// Add middleware for logging and request ID generation
@@ -13,9 +22,9 @@ func NewRouter() *chi.Mux {
 	r.Use(middleware.Logger)
 
 	// Define API routes
-	r.Post("/events", HandleIngestEvent)
-	r.Post("/events/bulk", HandleBulkIngestEvents)
-	r.Get("/metrics", HandleGetMetrics)
+	r.Post("/events", s.HandleIngestEvent)
+	r.Post("/events/bulk", s.HandleBulkIngestEvents)
+	r.Get("/metrics", s.HandleGetMetrics)
 
 	return r
 }

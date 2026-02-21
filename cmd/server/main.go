@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"fast-ingest/internal/api"
+	"fast-ingest/internal/storage"
 
 	"github.com/joho/godotenv"
 )
@@ -22,8 +23,19 @@ func main() {
 		log.Println("Error loading .env file")
 	}
 
+	// Create context that listens for the interrupt signal
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// Initialize the storage layer
+	store, err := storage.NewPostgres(ctx)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer store.Close()
+
 	// Set up the router
-	r := api.NewRouter()
+	r := api.NewRouter(store)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -36,10 +48,6 @@ func main() {
 		Handler: r,
 	}
 
-	// Create context that listens for the interrupt signal
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	// Start the server in a separate goroutine
 	go func() {
 		log.Printf("Starting the server on :%s\n", port)
@@ -50,6 +58,8 @@ func main() {
 
 	// Listen for the interrupt signal
 	<-ctx.Done()
+
+	fmt.Println("\nShutting down gracefully, press Ctrl+C again to force")
 
 	// Create shutdown context with 30-second timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
