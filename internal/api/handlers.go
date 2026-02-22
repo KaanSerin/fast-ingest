@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	api "fast-ingest/internal/api/dto"
 	"fast-ingest/internal/model"
+	"fast-ingest/internal/storage"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -36,6 +37,19 @@ func WriteSuccess(w http.ResponseWriter, status int, data any) {
 		Status: "success",
 		Data:   data,
 	})
+}
+
+// Server represents the API server with its dependencies.
+type Server struct {
+	Store storage.Store
+	Queue chan model.Event
+}
+
+func NewServer(store storage.Store, queueSize int) *Server {
+	return &Server{
+		Store: store,
+		Queue: make(chan model.Event, queueSize),
+	}
 }
 
 // HandleHealthCheck handles GET /health
