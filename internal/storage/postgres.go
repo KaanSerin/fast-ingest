@@ -59,7 +59,7 @@ func (p *PostgresStore) InsertEvents(ctx context.Context, events []model.Event) 
 		return err
 	}
 
-	log.Printf("Batch insert took %d ms", time.Since(start).Milliseconds())
+	log.Printf("Batch insert for %d items took %d ms", len(events), time.Since(start).Milliseconds())
 
 	return nil
 }
