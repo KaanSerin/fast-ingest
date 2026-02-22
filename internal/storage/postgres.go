@@ -36,7 +36,7 @@ func (p *PostgresStore) InsertEvents(ctx context.Context, events []model.Event) 
 
 	batch := &pgx.Batch{}
 	for _, e := range events {
-		t := time.Unix(e.Timestamp, 0).UTC()
+		t := NormalizeTimestamp(e.Timestamp)
 		tagsJSON, _ := json.Marshal(e.Tags)
 		metaJSON, _ := json.Marshal(e.Metadata)
 
@@ -67,7 +67,7 @@ func (p *PostgresStore) InsertEvents(ctx context.Context, events []model.Event) 
 func (p *PostgresStore) InsertEvent(ctx context.Context, e model.Event) error {
 
 	// Postgres expects timestamps in UTC, so we convert to UTC before inserting.
-	t := time.Unix(e.Timestamp, 0).UTC()
+	t := NormalizeTimestamp(e.Timestamp)
 
 	// Marshal tags and metadata to JSON for storage in jsonb columns.
 	tagsJSON, _ := json.Marshal(e.Tags)
@@ -119,8 +119,8 @@ func NewPostgres(ctx context.Context) (*PostgresStore, error) {
 }
 
 func (p *PostgresStore) GetMetrics(ctx context.Context, metricsDTO api.MetricsRequestDTO) (model.Metrics, error) {
-	from := time.Unix(metricsDTO.From, 0).UTC()
-	to := time.Unix(metricsDTO.To, 0).UTC()
+	from := NormalizeTimestamp(metricsDTO.From)
+	to := NormalizeTimestamp(metricsDTO.To)
 
 	var metrics model.Metrics = model.Metrics{
 		EventName: metricsDTO.EventName,
@@ -158,8 +158,8 @@ func (p *PostgresStore) Close() {
 }
 
 func (p *PostgresStore) getTotalsQuery(metricsDTO api.MetricsRequestDTO) (model.MetricsTotalsQueryResult, error) {
-	from := time.Unix(metricsDTO.From, 0).UTC()
-	to := time.Unix(metricsDTO.To, 0).UTC()
+	from := NormalizeTimestamp(metricsDTO.From)
+	to := NormalizeTimestamp(metricsDTO.To)
 
 	var totalsQueryResult model.MetricsTotalsQueryResult
 	totalsQuery := `SELECT
@@ -177,8 +177,8 @@ AND ts >= $2 AND ts < $3;`
 }
 
 func (p *PostgresStore) getTimeGroupQuery(metricsDTO api.MetricsRequestDTO) ([]model.MetricsTimeGroupQueryResult, error) {
-	from := time.Unix(metricsDTO.From, 0).UTC()
-	to := time.Unix(metricsDTO.To, 0).UTC()
+	from := NormalizeTimestamp(metricsDTO.From)
+	to := NormalizeTimestamp(metricsDTO.To)
 
 	groupQuery := `SELECT
 DATE_TRUNC($1, ts) AS bucket,
@@ -212,8 +212,8 @@ ORDER BY bucket;`
 }
 
 func (p *PostgresStore) getChannelGroupQuery(metricsDTO api.MetricsRequestDTO) ([]model.MetricsChannelGroupQueryResult, error) {
-	from := time.Unix(metricsDTO.From, 0).UTC()
-	to := time.Unix(metricsDTO.To, 0).UTC()
+	from := NormalizeTimestamp(metricsDTO.From)
+	to := NormalizeTimestamp(metricsDTO.To)
 
 	groupQuery := `SELECT
 channel,
@@ -262,4 +262,11 @@ func DedupeKey(e model.Event) string {
 	raw := e.EventName + "|" + e.Channel + "|" + e.CampaignID + "|" + e.UserID + "|" + strconv.FormatInt(ts, 10)
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+func NormalizeTimestamp(ts int64) time.Time {
+	if ts > 1e12 {
+		ts /= 1000
+	}
+	return time.Unix(ts, 0).UTC()
 }

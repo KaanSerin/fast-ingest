@@ -3,6 +3,7 @@ package storage
 import (
 	"fast-ingest/internal/model"
 	"testing"
+	"time"
 )
 
 func TestNullIfEmpty(t *testing.T) {
@@ -96,6 +97,51 @@ func TestDedupeKey(t *testing.T) {
 		msEvent.Timestamp = base.Timestamp * 1000
 		if DedupeKey(base) != DedupeKey(msEvent) {
 			t.Errorf("expected same key after ms normalization: %q vs %q", DedupeKey(base), DedupeKey(msEvent))
+		}
+	})
+}
+
+func TestNormalizeTimestamp(t *testing.T) {
+	t.Run("second timestamp returns correct UTC time", func(t *testing.T) {
+		ts := int64(1769904000)
+		result := NormalizeTimestamp(ts)
+		expected := time.Unix(1769904000, 0).UTC()
+		if !result.Equal(expected) {
+			t.Errorf("expected %v, got %v", expected, result)
+		}
+	})
+
+	t.Run("millisecond timestamp normalizes to same time as second timestamp", func(t *testing.T) {
+		ts := int64(1769904000)
+		resultSec := NormalizeTimestamp(ts)
+		resultMs := NormalizeTimestamp(ts * 1000)
+		if !resultSec.Equal(resultMs) {
+			t.Errorf("expected %v, got %v", resultSec, resultMs)
+		}
+	})
+
+	t.Run("result is always UTC", func(t *testing.T) {
+		result := NormalizeTimestamp(1769904000)
+		if result.Location() != time.UTC {
+			t.Errorf("expected UTC, got %v", result.Location())
+		}
+	})
+
+	t.Run("boundary: exactly 1e12 is treated as seconds", func(t *testing.T) {
+		ts := int64(1e12)
+		result := NormalizeTimestamp(ts)
+		expected := time.Unix(ts, 0).UTC()
+		if !result.Equal(expected) {
+			t.Errorf("expected %v, got %v", expected, result)
+		}
+	})
+
+	t.Run("boundary: 1e12+1 is treated as milliseconds", func(t *testing.T) {
+		ts := int64(1e12) + 1
+		result := NormalizeTimestamp(ts)
+		expected := time.Unix(ts/1000, 0).UTC()
+		if !result.Equal(expected) {
+			t.Errorf("expected %v, got %v", expected, result)
 		}
 	})
 }

@@ -204,12 +204,12 @@ func (s *Server) HandleGetMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if metricsDTO.From >= metricsDTO.To {
+	if storage.NormalizeTimestamp(metricsDTO.From).After(storage.NormalizeTimestamp(metricsDTO.To)) {
 		WriteError(w, http.StatusBadRequest, "from must be before to", nil)
 		return
 	}
 
-	if time.Unix(metricsDTO.From, 0).Before(time.Now().Add(-30 * 24 * time.Hour)) {
+	if storage.NormalizeTimestamp(metricsDTO.From).Before(time.Now().Add(-30 * 24 * time.Hour)) {
 		WriteError(w, http.StatusBadRequest, "from must be within the last 30 days", nil)
 		return
 	}
