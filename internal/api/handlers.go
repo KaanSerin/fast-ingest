@@ -145,10 +145,8 @@ func (s *Server) HandleBulkIngestEvents(w http.ResponseWriter, r *http.Request) 
 func (s *Server) HandleGetMetrics(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters for from and to timestamps
 	fromStr := r.URL.Query().Get("from")
-	toStr := r.URL.Query().Get("to")
-
-	if fromStr == "" || toStr == "" {
-		WriteError(w, http.StatusBadRequest, "from and to query parameters are required", nil)
+	if fromStr == "" {
+		WriteError(w, http.StatusBadRequest, "from query parameter is required", nil)
 		return
 	}
 
@@ -158,10 +156,18 @@ func (s *Server) HandleGetMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	to, err := strconv.ParseInt(toStr, 10, 64)
-	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid to timestamp", nil)
-		return
+	toStr := r.URL.Query().Get("to")
+	var to int64
+	// Default 'to' to current time if not provided
+	if toStr == "" {
+		to = time.Now().Unix()
+	} else {
+		var err error
+		to, err = strconv.ParseInt(toStr, 10, 64)
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, "invalid to timestamp", nil)
+			return
+		}
 	}
 
 	var metricsDTO api.MetricsRequestDTO
@@ -173,6 +179,7 @@ func (s *Server) HandleGetMetrics(w http.ResponseWriter, r *http.Request) {
 	metricsDTO.To = to
 
 	// Validate required fields
+	// A validation library could be used here for more complex validation rules
 	if metricsDTO.EventName == "" {
 		WriteError(w, http.StatusBadRequest, "event_name is required", nil)
 		return
