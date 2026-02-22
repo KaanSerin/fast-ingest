@@ -38,6 +38,10 @@ make run
 ### Other commands
 
 ```bash
+make test   # run test cases
+```
+
+```bash
 make migrate-down   # drop events table and clear schema_migrations
 ```
 
