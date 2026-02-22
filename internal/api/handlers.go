@@ -2,12 +2,41 @@ package api
 
 import (
 	"encoding/json"
+	api "fast-ingest/internal/api/dto"
 	"fast-ingest/internal/model"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 )
+
+type ErrorResponse struct {
+	Error   string         `json:"error"`
+	Details map[string]any `json:"details,omitempty"`
+}
+
+type SuccessResponse struct {
+	Status string `json:"status"`
+	Data   any    `json:"data,omitempty"`
+}
+
+func WriteError(w http.ResponseWriter, status int, msg string, details map[string]any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(ErrorResponse{
+		Error:   msg,
+		Details: details,
+	})
+}
+
+func WriteSuccess(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(SuccessResponse{
+		Status: "success",
+		Data:   data,
+	})
+}
 
 // HandleIngestEvent handles POST /events
 // Expects a single event payload in the request body.
@@ -19,28 +48,25 @@ func (s *Server) HandleIngestEvent(w http.ResponseWriter, r *http.Request) {
 	dec.DisallowUnknownFields() // Strict decoding to catch unexpected fields
 
 	if err := dec.Decode(&e); err != nil {
-		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "invalid JSON payload", nil)
 		return
 	}
 
 	// Validate required fields
 	if e.EventName == "" || e.Channel == "" || e.UserID == "" || e.Timestamp == 0 {
-		http.Error(w, "missing required fields", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "missing required fields", nil)
 		return
 	}
 
 	select {
 	case s.Queue <- e:
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status": "accepted",
-			"at":     time.Now().UTC().Format(time.RFC3339),
+		WriteSuccess(w, http.StatusAccepted, api.EventResponseDTO{
+			Instant: time.Now().UTC().Format(time.RFC3339),
 		})
 	default:
 		// queue full
 		w.Header().Set("Retry-After", "1")
-		http.Error(w, "ingest queue full", http.StatusTooManyRequests)
+		WriteError(w, http.StatusTooManyRequests, "ingest queue full", nil)
 	}
 }
 
@@ -54,17 +80,17 @@ func (s *Server) HandleBulkIngestEvents(w http.ResponseWriter, r *http.Request) 
 	dec.DisallowUnknownFields() // Strict decoding to catch unexpected fields
 
 	if err := dec.Decode(&events); err != nil {
-		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "invalid JSON payload", nil)
 		return
 	}
 
 	if len(events) == 0 {
-		http.Error(w, "events is required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "events is required", nil)
 		return
 	}
 
 	if len(events) > 1000 {
-		http.Error(w, "too many events (max 1000)", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "too many events (max 1000)", nil)
 		return
 	}
 
@@ -73,7 +99,7 @@ func (s *Server) HandleBulkIngestEvents(w http.ResponseWriter, r *http.Request) 
 		e := events[i]
 		// Validate required fields
 		if e.EventName == "" || e.Channel == "" || e.UserID == "" || e.Timestamp == 0 {
-			http.Error(w, fmt.Sprintf("invalid event at index %d", i), http.StatusBadRequest)
+			WriteError(w, http.StatusBadRequest, fmt.Sprintf("invalid event at index %d", i), nil)
 			return
 		}
 	}
@@ -86,16 +112,13 @@ func (s *Server) HandleBulkIngestEvents(w http.ResponseWriter, r *http.Request) 
 		default:
 			// queue full
 			w.Header().Set("Retry-After", "1")
-			http.Error(w, "ingest queue full", http.StatusTooManyRequests)
+			WriteError(w, http.StatusTooManyRequests, "ingest queue full", nil)
 			return
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":   "accepted",
-		"accepted": len(events),
+	WriteSuccess(w, http.StatusAccepted, api.EventsBulkResponseDTO{
+		Accepted: len(events),
 	})
 }
 
@@ -107,23 +130,23 @@ func (s *Server) HandleGetMetrics(w http.ResponseWriter, r *http.Request) {
 	toStr := r.URL.Query().Get("to")
 
 	if fromStr == "" || toStr == "" {
-		http.Error(w, "from and to query parameters are required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "from and to query parameters are required", nil)
 		return
 	}
 
 	from, err := strconv.ParseInt(fromStr, 10, 64)
 	if err != nil {
-		http.Error(w, "invalid from timestamp", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "invalid from timestamp", nil)
 		return
 	}
 
 	to, err := strconv.ParseInt(toStr, 10, 64)
 	if err != nil {
-		http.Error(w, "invalid to timestamp", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "invalid to timestamp", nil)
 		return
 	}
 
-	var metricsDTO model.MetricsDTO
+	var metricsDTO api.MetricsRequestDTO
 
 	// Get query parameters
 	metricsDTO.EventName = r.URL.Query().Get("event_name")
@@ -133,33 +156,33 @@ func (s *Server) HandleGetMetrics(w http.ResponseWriter, r *http.Request) {
 
 	// Validate required fields
 	if metricsDTO.EventName == "" {
-		http.Error(w, "event_name is required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "event_name is required", nil)
 		return
 	}
 
 	if metricsDTO.GroupBy != "" && metricsDTO.GroupBy != "day" && metricsDTO.GroupBy != "hour" && metricsDTO.GroupBy != "channel" {
-		http.Error(w, "invalid group_by value", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "invalid group_by value", nil)
 		return
 	}
 
 	if metricsDTO.From >= metricsDTO.To {
-		http.Error(w, "from must be before to", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "from must be before to", nil)
 		return
 	}
 
 	if time.Unix(metricsDTO.From, 0).Before(time.Now().Add(-30 * 24 * time.Hour)) {
-		http.Error(w, "from must be within the last 30 days", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "from must be within the last 30 days", nil)
 		return
 	}
 
 	// Retrieve metrics from the store
 	metrics, err := s.Store.GetMetrics(r.Context(), metricsDTO)
 	if err != nil {
-		http.Error(w, "failed to retrieve metrics", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "failed to retrieve metrics", nil)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(metrics)
+	WriteSuccess(w, http.StatusOK, api.MetricsResponseDTO{
+		Metrics: metrics,
+	})
 }

@@ -2,13 +2,16 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
-	"fast-ingest/internal/helpers"
+	api "fast-ingest/internal/api/dto"
 	"fast-ingest/internal/model"
 
 	"github.com/jackc/pgx/v5"
@@ -41,7 +44,7 @@ func (p *PostgresStore) InsertEvents(ctx context.Context, events []model.Event) 
 			INSERT INTO events (dedupe_key, event_name, channel, campaign_id, user_id, ts, tags, metadata)
 			VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb)
 			ON CONFLICT (dedupe_key) DO NOTHING;
-		`, helpers.DedupeKey(e), e.EventName, e.Channel, helpers.NullIfEmpty(e.CampaignID), e.UserID, t, tagsJSON, metaJSON)
+		`, DedupeKey(e), e.EventName, e.Channel, NullIfEmpty(e.CampaignID), e.UserID, t, tagsJSON, metaJSON)
 	}
 
 	start := time.Now()
@@ -74,7 +77,7 @@ func (p *PostgresStore) InsertEvent(ctx context.Context, e model.Event) error {
 		INSERT INTO events (dedupe_key, event_name, channel, campaign_id, user_id, ts, tags, metadata)
 VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb)
 ON CONFLICT (dedupe_key) DO NOTHING;
-	`, helpers.DedupeKey(e), e.EventName, e.Channel, helpers.NullIfEmpty(e.CampaignID), e.UserID, t, tagsJSON, metaJSON)
+	`, DedupeKey(e), e.EventName, e.Channel, NullIfEmpty(e.CampaignID), e.UserID, t, tagsJSON, metaJSON)
 
 	return err
 }
@@ -115,7 +118,7 @@ func NewPostgres(ctx context.Context) (*PostgresStore, error) {
 	return &PostgresStore{pool: pool}, nil
 }
 
-func (p *PostgresStore) GetMetrics(ctx context.Context, metricsDTO model.MetricsDTO) (model.Metrics, error) {
+func (p *PostgresStore) GetMetrics(ctx context.Context, metricsDTO api.MetricsRequestDTO) (model.Metrics, error) {
 	from := time.Unix(metricsDTO.From, 0).UTC()
 	to := time.Unix(metricsDTO.To, 0).UTC()
 
@@ -154,7 +157,7 @@ func (p *PostgresStore) Close() {
 	p.pool.Close()
 }
 
-func (p *PostgresStore) getTotalsQuery(metricsDTO model.MetricsDTO) (model.MetricsTotalsQueryResult, error) {
+func (p *PostgresStore) getTotalsQuery(metricsDTO api.MetricsRequestDTO) (model.MetricsTotalsQueryResult, error) {
 	from := time.Unix(metricsDTO.From, 0).UTC()
 	to := time.Unix(metricsDTO.To, 0).UTC()
 
@@ -173,7 +176,7 @@ AND ts >= $2 AND ts < $3;`
 	return totalsQueryResult, nil
 }
 
-func (p *PostgresStore) getTimeGroupQuery(metricsDTO model.MetricsDTO) ([]model.MetricsTimeGroupQueryResult, error) {
+func (p *PostgresStore) getTimeGroupQuery(metricsDTO api.MetricsRequestDTO) ([]model.MetricsTimeGroupQueryResult, error) {
 	from := time.Unix(metricsDTO.From, 0).UTC()
 	to := time.Unix(metricsDTO.To, 0).UTC()
 
@@ -208,7 +211,7 @@ ORDER BY bucket;`
 	return results, nil
 }
 
-func (p *PostgresStore) getChannelGroupQuery(metricsDTO model.MetricsDTO) ([]model.MetricsChannelGroupQueryResult, error) {
+func (p *PostgresStore) getChannelGroupQuery(metricsDTO api.MetricsRequestDTO) ([]model.MetricsChannelGroupQueryResult, error) {
 	from := time.Unix(metricsDTO.From, 0).UTC()
 	to := time.Unix(metricsDTO.To, 0).UTC()
 
@@ -241,4 +244,22 @@ ORDER BY channel;`
 	}
 
 	return results, nil
+}
+
+// Helper functions
+func NullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func DedupeKey(e model.Event) string {
+	ts := e.Timestamp
+	if ts > 1e12 {
+		ts /= 1000
+	} // normalize
+	raw := e.EventName + "|" + e.Channel + "|" + e.CampaignID + "|" + e.UserID + "|" + strconv.FormatInt(ts, 10)
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }

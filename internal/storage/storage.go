@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 
+	api "fast-ingest/internal/api/dto"
 	"fast-ingest/internal/model"
 )
 
@@ -18,7 +19,7 @@ type Store interface {
 	InsertEvents(ctx context.Context, events []model.Event) error
 
 	// GetMetrics retrieves aggregated metrics based on the provided filters and grouping.
-	GetMetrics(ctx context.Context, metricsDTO model.MetricsDTO) (model.Metrics, error)
+	GetMetrics(ctx context.Context, metricsDTO api.MetricsRequestDTO) (model.Metrics, error)
 
 	// Close releases resources (db connections, file handles, etc.).
 	Close()
