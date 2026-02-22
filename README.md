@@ -7,7 +7,7 @@ A high-throughput event ingestion API backed by PostgreSQL. Events are queued in
 ### Prerequisites
 
 - Go 1.24+
-- PostgreSQL 16+
+- PostgreSQL 14+
 
 ### Setup
 
@@ -81,9 +81,53 @@ docker compose logs -f server
 ## Postman
 The postman collection can be found <a href="https://documenter.getpostman.com/view/8807961/2sBXcEkg4g">here</a>
 
-## TODO
+## Assumptions
 
-Ultimately, the technology used and not considered were decided with the time limit and my experience with them in mind. Given enough resources, those technologies can also be utilized. The project has a lot of room for improvement with a solid base already built.
+### Event Identity / Idempotency
+
+* Events do not contain a dedicated `event_id`.
+* Idempotency is achieved via a derived `dedupe_key` based on:
+
+  * `event_name`
+  * `channel`
+  * `campaign_id`
+  * `user_id`
+  * normalized `timestamp`
+* Duplicate events with identical key fields are ignored.
+
+### Timestamp Format
+
+* `timestamp` is provided as Unix time.
+* Both seconds and milliseconds are supported.
+* Timestamps are normalized to UTC before storage.
+
+### Metrics Freshness
+
+* Metrics are eventually consistent.
+* Due to asynchronous ingestion and batching, metrics may lag by a small amount.
+* Strict real-time guarantees were not required.
+
+### Grouping Behavior
+
+* Only one grouping dimension is supported per request:
+
+  * `hour`
+  * `day`
+  * or `channel`
+* Multi-dimensional grouping (e.g., hour + channel) is intentionally out of scope.
+
+### Time Range Limits
+
+* If `to` is not provided, defaults are applied.
+* Extremely large time ranges may impact performance.
+* 30 day upper limit set for `from` value
+
+### Event Schema Flexibility
+
+* `tags` and `metadata` are stored as JSONB.
+* No strict schema validation is enforced on metadata fields.
+
+## TODO
 
 ### Next Improvements
 * Add proper request rate limiting per client and/or channel.
@@ -114,3 +158,6 @@ These trade offs were made considering the time constraint of the project.
 3. Separate read and write database workloads.
 5. Implement a Dead-letter queue for failed events
 6. Consider pre-aggregated tables for heavy metrics queries.
+
+### Conclusion
+Ultimately, the technology used and not considered were decided with the time limit and my experience with them in mind. Given enough resources, those technologies can also be utilized. The project has a lot of room for improvement with a solid base already built.
