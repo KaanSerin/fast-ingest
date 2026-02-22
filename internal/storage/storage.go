@@ -17,6 +17,9 @@ type Store interface {
 	// InsertEvents persists a batch of raw events (preferred path for ingestion).
 	InsertEvents(ctx context.Context, events []model.Event) error
 
+	// GetMetrics retrieves aggregated metrics based on the provided filters and grouping.
+	GetMetrics(ctx context.Context, metricsDTO model.MetricsDTO) (model.Metrics, error)
+
 	// Close releases resources (db connections, file handles, etc.).
 	Close()
 }

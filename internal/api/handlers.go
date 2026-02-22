@@ -5,6 +5,7 @@ import (
 	"fast-ingest/internal/model"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -101,6 +102,64 @@ func (s *Server) HandleBulkIngestEvents(w http.ResponseWriter, r *http.Request) 
 // HandleGetMetrics handles GET /metrics
 // Returns aggregated metric data over a time range.
 func (s *Server) HandleGetMetrics(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement metrics retrieval logic here
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	// Parse query parameters for from and to timestamps
+	fromStr := r.URL.Query().Get("from")
+	toStr := r.URL.Query().Get("to")
+
+	if fromStr == "" || toStr == "" {
+		http.Error(w, "from and to query parameters are required", http.StatusBadRequest)
+		return
+	}
+
+	from, err := strconv.ParseInt(fromStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid from timestamp", http.StatusBadRequest)
+		return
+	}
+
+	to, err := strconv.ParseInt(toStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid to timestamp", http.StatusBadRequest)
+		return
+	}
+
+	var metricsDTO model.MetricsDTO
+
+	// Get query parameters
+	metricsDTO.EventName = r.URL.Query().Get("event_name")
+	metricsDTO.GroupBy = r.URL.Query().Get("group_by")
+	metricsDTO.From = from
+	metricsDTO.To = to
+
+	// Validate required fields
+	if metricsDTO.EventName == "" {
+		http.Error(w, "event_name is required", http.StatusBadRequest)
+		return
+	}
+
+	if metricsDTO.GroupBy != "" && metricsDTO.GroupBy != "day" && metricsDTO.GroupBy != "hour" && metricsDTO.GroupBy != "channel" {
+		http.Error(w, "invalid group_by value", http.StatusBadRequest)
+		return
+	}
+
+	if metricsDTO.From >= metricsDTO.To {
+		http.Error(w, "from must be before to", http.StatusBadRequest)
+		return
+	}
+
+	if time.Unix(metricsDTO.From, 0).Before(time.Now().Add(-30 * 24 * time.Hour)) {
+		http.Error(w, "from must be within the last 30 days", http.StatusBadRequest)
+		return
+	}
+
+	// Retrieve metrics from the store
+	metrics, err := s.Store.GetMetrics(r.Context(), metricsDTO)
+	if err != nil {
+		http.Error(w, "failed to retrieve metrics", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(metrics)
 }

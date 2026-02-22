@@ -115,6 +115,130 @@ func NewPostgres(ctx context.Context) (*PostgresStore, error) {
 	return &PostgresStore{pool: pool}, nil
 }
 
+func (p *PostgresStore) GetMetrics(ctx context.Context, metricsDTO model.MetricsDTO) (model.Metrics, error) {
+	from := time.Unix(metricsDTO.From, 0).UTC()
+	to := time.Unix(metricsDTO.To, 0).UTC()
+
+	var metrics model.Metrics = model.Metrics{
+		EventName: metricsDTO.EventName,
+		From:      from.Format(time.RFC3339),
+		To:        to.Format(time.RFC3339),
+		GroupBy:   metricsDTO.GroupBy,
+	}
+
+	totalsQueryResult, err := p.getTotalsQuery(metricsDTO)
+	if err != nil {
+		return model.Metrics{}, err
+	}
+
+	metrics.TotalEvents = totalsQueryResult.TotalEvents
+	metrics.TotalUniqueEventsForUser = totalsQueryResult.TotalUniqueEventsForUser
+
+	// If group_by is specified, we need to run a separate query to get the breakdown by group.
+	if metricsDTO.GroupBy == "day" || metricsDTO.GroupBy == "hour" {
+		groupQueryResults, err := p.getTimeGroupQuery(metricsDTO)
+		if err == nil {
+			metrics.GroupBreakdown = groupQueryResults
+		}
+	} else if metricsDTO.GroupBy == "channel" {
+		channelGroupQueryResults, err := p.getChannelGroupQuery(metricsDTO)
+		if err == nil {
+			metrics.GroupBreakdown = channelGroupQueryResults
+		}
+	}
+
+	return metrics, nil
+}
+
 func (p *PostgresStore) Close() {
 	p.pool.Close()
+}
+
+func (p *PostgresStore) getTotalsQuery(metricsDTO model.MetricsDTO) (model.MetricsTotalsQueryResult, error) {
+	from := time.Unix(metricsDTO.From, 0).UTC()
+	to := time.Unix(metricsDTO.To, 0).UTC()
+
+	var totalsQueryResult model.MetricsTotalsQueryResult
+	totalsQuery := `SELECT
+COUNT(*) AS total_events,
+COUNT(DISTINCT user_id) AS total_unique_events_for_user
+FROM events
+WHERE event_name = $1
+AND ts >= $2 AND ts < $3;`
+	row := p.pool.QueryRow(context.Background(), totalsQuery, metricsDTO.EventName, from, to)
+	if err := row.Scan(&totalsQueryResult.TotalEvents, &totalsQueryResult.TotalUniqueEventsForUser); err != nil {
+		return model.MetricsTotalsQueryResult{}, err
+	}
+
+	return totalsQueryResult, nil
+}
+
+func (p *PostgresStore) getTimeGroupQuery(metricsDTO model.MetricsDTO) ([]model.MetricsTimeGroupQueryResult, error) {
+	from := time.Unix(metricsDTO.From, 0).UTC()
+	to := time.Unix(metricsDTO.To, 0).UTC()
+
+	groupQuery := `SELECT
+DATE_TRUNC($1, ts) AS bucket,
+COUNT(*) AS total_count,
+COUNT(DISTINCT user_id) AS total_unique_event_for_user_count
+FROM events
+WHERE event_name = $2
+AND ts >= $3 AND ts < $4
+GROUP BY bucket
+ORDER BY bucket;`
+	rows, err := p.pool.Query(context.Background(), groupQuery, metricsDTO.GroupBy, metricsDTO.EventName, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []model.MetricsTimeGroupQueryResult
+	for rows.Next() {
+		var r model.MetricsTimeGroupQueryResult
+		if err := rows.Scan(&r.Bucket, &r.TotalEvents, &r.TotalUniqueEventsForUser); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func (p *PostgresStore) getChannelGroupQuery(metricsDTO model.MetricsDTO) ([]model.MetricsChannelGroupQueryResult, error) {
+	from := time.Unix(metricsDTO.From, 0).UTC()
+	to := time.Unix(metricsDTO.To, 0).UTC()
+
+	groupQuery := `SELECT
+channel,
+COUNT(*) AS total_count,
+COUNT(DISTINCT user_id) AS total_unique_event_for_user_count
+FROM events
+WHERE event_name = $1
+AND ts >= $2 AND ts < $3
+GROUP BY channel
+ORDER BY channel;`
+	rows, err := p.pool.Query(context.Background(), groupQuery, metricsDTO.EventName, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []model.MetricsChannelGroupQueryResult
+	for rows.Next() {
+		var r model.MetricsChannelGroupQueryResult
+		if err := rows.Scan(&r.Channel, &r.TotalEvents, &r.TotalUniqueEventsForUser); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
 }
