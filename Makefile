@@ -4,6 +4,9 @@ export
 run:
 	go run ./cmd/server/main.go
 
+test:
+	go test -v ./...
+
 migrate-up:
 	go run ./cmd/migrate/main.go
 
