@@ -23,7 +23,13 @@ PORT=8080
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/fastingest?sslmode=disable
 ```
 
-2. Run migrations:
+2. Download dependencies:
+
+```bash
+go mod download
+```
+
+3. Run migrations:
 
 ```bash
 make migrate-up
