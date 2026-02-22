@@ -11,8 +11,8 @@ import (
 )
 
 type ErrorResponse struct {
-	Error   string         `json:"error"`
-	Details map[string]any `json:"details,omitempty"`
+	Error   string `json:"error"`
+	Details any    `json:"details,omitempty"`
 }
 
 type SuccessResponse struct {
@@ -20,7 +20,7 @@ type SuccessResponse struct {
 	Data   any    `json:"data,omitempty"`
 }
 
-func WriteError(w http.ResponseWriter, status int, msg string, details map[string]any) {
+func WriteError(w http.ResponseWriter, status int, msg string, details any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(ErrorResponse{
@@ -35,6 +35,24 @@ func WriteSuccess(w http.ResponseWriter, status int, data any) {
 	_ = json.NewEncoder(w).Encode(SuccessResponse{
 		Status: "success",
 		Data:   data,
+	})
+}
+
+// HandleHealthCheck handles GET /health
+// Checks database connectivity and returns queue length.
+func (s *Server) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	// Testing DB connection
+	err := s.Store.Ping(r.Context())
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "database connection failed", api.HealthCheckErrorResponseDTO{
+			Error: err.Error(),
+		})
+		return
+	}
+
+	WriteSuccess(w, http.StatusOK, api.HealthCheckResponseDTO{
+		Status:      "ok",
+		QueueLength: len(s.Queue),
 	})
 }
 

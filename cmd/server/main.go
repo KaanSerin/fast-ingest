@@ -29,6 +29,7 @@ func main() {
 	defer stop()
 
 	// Initialize the storage layer
+	// Can be swapped for a different implementation (eg: ClickHouse) in the future
 	store, err := storage.NewPostgres(ctx)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
@@ -37,7 +38,7 @@ func main() {
 
 	// Set up the router
 	server := api.NewServer(store, 20000) // Queue size of 20,000 for event processing
-	r := api.NewRouter(*server)
+	r := api.NewRouter(server)
 
 	// Get the port from environment variables, default to 8080 if not set
 	port := os.Getenv("PORT")
@@ -59,6 +60,7 @@ func main() {
 		}
 	}()
 
+	// Initialize the worker for processing events from the queue
 	w := &worker.Writer{
 		Store:         store,
 		In:            server.Queue,
@@ -72,6 +74,7 @@ func main() {
 	// Listen for the interrupt signal
 	<-ctx.Done()
 
+	// Not so graceful shutdown, does not empty the queue before shutting down
 	fmt.Println("\nShutting down gracefully, press Ctrl+C again to force")
 
 	// Create shutdown context with 30-second timeout
